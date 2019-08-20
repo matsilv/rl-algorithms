@@ -20,6 +20,7 @@ class RandomPolicy(Policy):
         action = random.randint(0, self.num_actions-1)
         return action
 
+
 # greedy policy
 class GreedyPolicy(Policy):
     def select_action(self, q_values, **kwargs):
@@ -28,11 +29,11 @@ class GreedyPolicy(Policy):
 
 
 class StochasticPolicy(Policy):
-    def select_action(self, q_values, **kwargs):
+    def select_action(self, probs, **kwargs):
         actions = np.arange(0, self.num_actions)
-        action = np.random.choice(actions, size=1, p=q_values)
+        action = np.random.choice(actions, size=1, p=probs)
 
-        return action
+        return action[0]
 
 
 # epsilon greedy policy with epsilon linear annealing

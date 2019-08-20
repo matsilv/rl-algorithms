@@ -2,9 +2,9 @@
 
 import numpy as np
 import tensorflow as tf
-from common.policy import RandomPolicy, EpsilonGreedyPolicy, GreedyPolicy
+from common.policy import RandomPolicy, EpsilonGreedyPolicy, GreedyPolicy, StochasticPolicy
 from common.memory import ReplayExperienceBuffer
-from common.model import CNNModel, FullyConnectedModel
+from common.model import CNNModel, FullyConnectedModel, A2CNetwork
 from common.atari_wrapper import make_env
 import gym
 import copy
@@ -158,6 +158,7 @@ def q_learning_main(args):
             q_values = q_fun_net.predict_one(s_t, sess)
             a_t = policy.select_action(q_values)
             s_tp1, r_t, game_over, _ = env.step(a_t)
+            s_t = s_tp1
             score += r_t
 
         print('Score: {}'.format(score))
@@ -181,4 +182,213 @@ def update_target_graph(sess):
         op_holder.append(to_var.assign(from_var))
 
     sess.run(op_holder)
+
+########################################################################################################################
+
+# compute total expected reward
+def calc_qvals(rewards, gamma):
+    res = []
+    sum_r = 0.0
+    for r in reversed(rewards):
+        sum_r *= gamma
+        sum_r += r
+        res.append(sum_r)
+    return list(reversed(res))
+
+
+# Reinforce main function
+def reinforce_main(args):
+    ENV_NAME = args.env_name
+    if args.render == 't':
+        RENDER = True
+    else:
+        RENDER = False
+    if args.atari == 't':
+        ATARI = True
+    else:
+        ATARI = False
+    NUM_STEPS = args.num_steps
+    GAMMA = args.gamma
+
+    # Reset the graph
+    tf.reset_default_graph()
+    if ATARI:
+        env = make_env(ENV_NAME)
+        INPUT_SHAPE = (84, 84, 4)
+        policy_net = CNNModel(INPUT_SHAPE, env.action_space.n, scope="policy_network", apply_softmax=True)
+    else:
+        env = gym.make(ENV_NAME)
+        INPUT_SHAPE = env.observation_space.shape[0]
+        policy_net = FullyConnectedModel(INPUT_SHAPE, env.action_space.n, 1, scope="policy_network",
+                                         apply_softmax=True)
+
+    print('Environment name: {}'.format(ENV_NAME))
+    print('Observation space: {}'.format(env.observation_space))
+    print('Action space: {}'.format(env.action_space))
+
+    policy = StochasticPolicy(env.action_space.n)
+
+    with tf.Session() as sess:
+        sess.run(policy_net.var_init)
+
+        frames = 0
+        r_interval = 0
+
+        while frames < NUM_STEPS:
+            game_over = False
+            s_t = env.reset()
+            score = 0
+            loss = 0
+
+            rewards = []
+            actions = []
+            states = []
+
+            while not game_over:
+
+                if RENDER:
+                    env.render()
+
+                probs = policy_net.predict_one(s_t, sess, apply_softmax=True)
+                probs = probs.reshape(-1)
+                a_t = policy.select_action(probs)
+                action = np.zeros(env.action_space.n)
+                action[a_t] = 1
+                actions.append(action)
+                states.append(s_t)
+                s_tp1, r_t, game_over, _ = env.step(a_t)
+                rewards.append(r_t)
+                r_interval += r_t
+                s_tp1 = np.array(s_tp1)
+                s_t = s_tp1
+
+                score += r_t
+                frames += 1
+
+                if frames % 10000 == 0:
+                    r_interval /= 10000
+                    print('Interval mean reward: {}'.format(r_interval))
+                    r_interval = 0
+
+            q_vals = calc_qvals(rewards, gamma=GAMMA)
+            loss = policy_net.train_batch(sess, states, actions, q_vals)
+            states.clear()
+            q_vals.clear()
+
+            print('Frame: {}/{} | Score: {} | Loss: {}'.
+                  format(frames, NUM_STEPS, score, loss))
+
+        s_t = env.reset()
+        policy = StochasticPolicy(env.action_space.n)
+        score = 0
+        game_over = False
+
+        while not game_over:
+            probs = policy_net.predict_one(s_t, sess)
+            a_t = policy.select_action(probs)
+            s_tp1, r_t, game_over, _ = env.step(a_t)
+            score += r_t
+
+        print('Score: {}'.format(score))
+
+    env.close()
+    sess.close()
+########################################################################################################################
+
+# A2C main function
+def a2c_main(args):
+    ENV_NAME = args.env_name
+    if args.render == 't':
+        RENDER = True
+    else:
+        RENDER = False
+    if args.atari == 't':
+        ATARI = True
+    else:
+        ATARI = False
+    NUM_STEPS = args.num_steps
+    GAMMA = args.gamma
+
+    # Reset the graph
+    tf.reset_default_graph()
+    if ATARI:
+        env = make_env(ENV_NAME)
+        INPUT_SHAPE = (84, 84, 4)
+        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, scope="a2c_network")
+    else:
+        env = gym.make(ENV_NAME)
+        INPUT_SHAPE = env.observation_space.shape[0]
+        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, 1, scope="policy_network")
+
+    print('Environment name: {}'.format(ENV_NAME))
+    print('Observation space: {}'.format(env.observation_space))
+    print('Action space: {}'.format(env.action_space))
+
+    policy = StochasticPolicy(env.action_space.n)
+
+    with tf.Session() as sess:
+        sess.run(policy_net.var_init)
+
+        frames = 0
+        r_interval = 0
+
+        while frames < NUM_STEPS:
+            game_over = False
+            s_t = env.reset()
+            score = 0
+            loss = 0
+
+            rewards = []
+            actions = []
+            states = []
+
+            while not game_over:
+
+                if RENDER:
+                    env.render()
+
+                probs = policy_net.predict_one(s_t, sess, apply_softmax=True)
+                probs = probs.reshape(-1)
+                a_t = policy.select_action(probs)
+                action = np.zeros(env.action_space.n)
+                action[a_t] = 1
+                actions.append(action)
+                states.append(s_t)
+                s_tp1, r_t, game_over, _ = env.step(a_t)
+                rewards.append(r_t)
+                r_interval += r_t
+                s_tp1 = np.array(s_tp1)
+                s_t = s_tp1
+
+                score += r_t
+                frames += 1
+
+                if frames % 10000 == 0:
+                    r_interval /= 10000
+                    print('Interval mean reward: {}'.format(r_interval))
+                    r_interval = 0
+
+            q_vals = calc_qvals(rewards, gamma=GAMMA)
+            loss_policy, loss_value = policy_net.train_batch(sess, states, actions, q_vals)
+            states.clear()
+            q_vals.clear()
+
+            print('Frame: {}/{} | Score: {} | Loss policy: {} | Loss value: {}'.
+                  format(frames, NUM_STEPS, score, loss_policy, loss_value))
+
+        s_t = env.reset()
+        policy = StochasticPolicy(env.action_space.n)
+        score = 0
+        game_over = False
+
+        while not game_over:
+            probs = policy_net.predict_one(s_t, sess)
+            a_t = policy.select_action(probs)
+            s_tp1, r_t, game_over, _ = env.step(a_t)
+            score += r_t
+
+        print('Score: {}'.format(score))
+
+    env.close()
+    sess.close()
 

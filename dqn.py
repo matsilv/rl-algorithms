@@ -1,7 +1,7 @@
 #Author: Mattia Silvestri
 
 import argparse
-from common.algorithms import q_learning_main
+from common.algorithms import q_learning_main, reinforce_main, a2c_main
 
 
 """ main program """
@@ -25,7 +25,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    q_learning_main(args)
+    #q_learning_main(args)
+    #reinforce_main(args)
+    a2c_main(args)
 
     exit(0)
 
