@@ -25,9 +25,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    #q_learning_main(args)
+    q_learning_main(args)
     #reinforce_main(args)
-    a2c_main(args)
+    #a2c_main(args)
 
     exit(0)
 
