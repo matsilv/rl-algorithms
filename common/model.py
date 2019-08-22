@@ -231,38 +231,72 @@ class A2CNetwork:
                 fc1 = tf.layers.dense(self._states, 50, activation=tf.nn.relu,
                                       kernel_initializer=tf.random_normal_initializer(),
                                       name="fc1")
-                fc2 = tf.layers.dense(fc1, 50, activation=tf.nn.relu,
+                fc = tf.layers.dense(fc1, 50, activation=tf.nn.relu,
                                       kernel_initializer=tf.random_normal_initializer(),
                                       name="fc2")
+            else:
+                self._states = tf.placeholder(shape=[None, *self._num_states], dtype=tf.float32, name="states")
+                self._actions = tf.placeholder(tf.int32, [None, self._num_actions], name="actions")
+                self._y_train = tf.placeholder(shape=[None,], dtype=tf.float32, name="q_vals")
 
-                self.policy = tf.layers.dense(fc2, self._num_actions, name="policy")
-                self.value = tf.layers.dense(fc2, 1, name="value")
+                # create convolutional layers
+                conv1 = tf.layers.conv2d(self._states,
+                                         filters=32,
+                                         kernel_size=[8, 8],
+                                         strides=[4, 4],
+                                         activation=tf.nn.relu,
+                                         name="conv1")
 
-                self.probs = tf.nn.softmax(self.policy, name="probs")
-                adv = self._y_train - tf.stop_gradient(self.value)
-                neg_log_prob = adv * tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.policy,
-                                                                                labels=self._actions)
-                self.loss_policy = tf.reduce_mean(neg_log_prob * self._y_train, name="loss_policy")
-                self.loss_value = tf.reduce_mean(tf.square(self.value - self._y_train), name="loss_value")
+                conv2 = tf.layers.conv2d(conv1,
+                                         filters=64,
+                                         kernel_size=[4, 4],
+                                         strides=[2, 2],
+                                         activation=tf.nn.relu,
+                                         name="conv2")
 
-                self._optimizer1 = tf.train.AdamOptimizer(name="optimizer1").minimize(self.loss_policy)
-                self._optimizer2 = tf.train.AdamOptimizer(name="optimizer2").minimize(self.loss_value)
+                conv3 = tf.layers.conv2d(conv2,
+                                         filters=64,
+                                         kernel_size=[3, 3],
+                                         strides=1,
+                                         activation=tf.nn.relu,
+                                         name="conv3")
 
-                self._var_init = tf.global_variables_initializer()
+                flat = tf.layers.flatten(conv3, name="flatten")
 
-    def predict_one(self, state, sess, apply_softmax=False):
-        if not apply_softmax:
-            return sess.run(self._logits, feed_dict={self._states:
+                fc = tf.layers.dense(flat, units=512, activation=tf.nn.relu, name="fc")
+
+            self.policy = tf.layers.dense(fc, self._num_actions, name="policy")
+            self.value = tf.layers.dense(fc, 1, name="value")
+
+            self.probs = tf.nn.softmax(self.policy, name="probs")
+            self.logsoftmax = tf.nn.log_softmax(self.policy, name="log_softmax")
+            adv = self._y_train - tf.stop_gradient(self.value)
+            neg_log_prob = adv * tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.policy,
+                                                                            labels=self._actions)
+            self.loss_policy = tf.reduce_mean(neg_log_prob * self._y_train, name="loss_policy")
+            self.loss_value = tf.reduce_mean(tf.square(self.value - self._y_train), name="loss_value")
+            self.loss_entropy = \
+                0.0 * tf.reduce_mean(tf.reduce_sum(self.probs * self.logsoftmax, axis=1), name="entropy_loss")
+            self.loss_entropy_value = self.loss_entropy + self.loss_value
+
+            self._optimizer1 = tf.train.AdamOptimizer(name="optimizer1").minimize(self.loss_policy)
+            self._optimizer2 = tf.train.AdamOptimizer(name="optimizer2").minimize(self.loss_entropy_value)
+
+            self._var_init = tf.global_variables_initializer()
+
+    def predict_one(self, state, sess, apply_softmax=True, cnn=False):
+        if not cnn:
+            return sess.run(self.probs, feed_dict={self._states:
                                                          state.reshape(1, self.num_states)})
         else:
             return sess.run(self.probs, feed_dict={self._states:
-                                                         state.reshape(1, self.num_states)})
+                                                         state.reshape(1, *self.num_states)})
 
-    def predict_batch(self, states, sess):
-        return sess.run(self._logits, feed_dict={self._states: states})
+    def predict_values(self, states, sess):
+        return sess.run(self.value, feed_dict={self._states: states})
 
     def train_batch(self, sess, states, actions, q_vals):
-        loss_policy, loss_value, _, _ = sess.run([self.loss_policy, self.loss_value,
+        loss_policy, loss_value, _, _ = sess.run([self.loss_policy, self.loss_entropy_value,
                                        self._optimizer1, self._optimizer2],
                                       feed_dict={self._states: states, self._y_train: q_vals, self._actions: actions})
 

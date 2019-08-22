@@ -314,11 +314,13 @@ def a2c_main(args):
     if ATARI:
         env = make_env(ENV_NAME)
         INPUT_SHAPE = (84, 84, 4)
-        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, scope="a2c_network")
+        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, 1, scope="policy_network", cnn=True)
     else:
         env = gym.make(ENV_NAME)
         INPUT_SHAPE = env.observation_space.shape[0]
-        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, 1, scope="policy_network")
+        policy_net = A2CNetwork(INPUT_SHAPE, env.action_space.n, 1, scope="policy_network", cnn=False)
+
+    BATCH_SIZE = args.batch_size
 
     print('Environment name: {}'.format(ENV_NAME))
     print('Observation space: {}'.format(env.observation_space))
@@ -332,22 +334,22 @@ def a2c_main(args):
         frames = 0
         r_interval = 0
 
+        rewards = []
+        actions = []
+        states = []
+        idx = 0
+
         while frames < NUM_STEPS:
             game_over = False
             s_t = env.reset()
             score = 0
-            loss = 0
-
-            rewards = []
-            actions = []
-            states = []
 
             while not game_over:
 
                 if RENDER:
                     env.render()
 
-                probs = policy_net.predict_one(s_t, sess, apply_softmax=True)
+                probs = policy_net.predict_one(s_t, sess, apply_softmax=True, cnn=ATARI)
                 probs = probs.reshape(-1)
                 a_t = policy.select_action(probs)
                 action = np.zeros(env.action_space.n)
@@ -368,13 +370,33 @@ def a2c_main(args):
                     print('Interval mean reward: {}'.format(r_interval))
                     r_interval = 0
 
-            q_vals = calc_qvals(rewards, gamma=GAMMA)
-            loss_policy, loss_value = policy_net.train_batch(sess, states, actions, q_vals)
-            states.clear()
-            q_vals.clear()
+                if len(rewards) == BATCH_SIZE:
+                    q_vals = calc_qvals(rewards, gamma=GAMMA)
 
-            print('Frame: {}/{} | Score: {} | Loss policy: {} | Loss value: {}'.
-                  format(frames, NUM_STEPS, score, loss_policy, loss_value))
+                    last_vals = policy_net.predict_values(states, sess)
+                    last_vals.reshape(-1)
+                    for id in range(len(q_vals)):
+                        q_vals[id] += GAMMA * last_vals[id]
+
+                    q_vals = np.asarray(q_vals).reshape(-1)
+
+                    policy_net.train_batch(sess, states, actions, q_vals)
+                    num_episodes = len(states)
+                    states.clear()
+                    rewards.clear()
+                    actions.clear()
+
+            if len(rewards) > 0:
+                q_vals = calc_qvals(rewards, gamma=GAMMA)
+                num_episodes = len(states)
+                loss_policy, loss_value = policy_net.train_batch(sess, states, actions, q_vals)
+                states.clear()
+                q_vals.clear()
+                rewards.clear()
+                actions.clear()
+
+            print('Frame: {}/{} | Score: {} | Loss policy: {} | Loss value: {} | Steps: {}'.
+                  format(frames, NUM_STEPS, score, loss_policy, loss_value, num_episodes))
 
         s_t = env.reset()
         policy = StochasticPolicy(env.action_space.n)
