@@ -275,12 +275,12 @@ class A2CNetwork:
                                                                             labels=self._actions)
             self.loss_policy = tf.reduce_mean(neg_log_prob * self._y_train, name="loss_policy")
             self.loss_value = tf.reduce_mean(tf.square(self.value - self._y_train), name="loss_value")
-            self.loss_entropy = \
-                0.0 * tf.reduce_mean(tf.reduce_sum(self.probs * self.logsoftmax, axis=1), name="entropy_loss")
-            self.loss_entropy_value = self.loss_entropy + self.loss_value
+            #self.loss_entropy = \
+            #    0.0 * tf.reduce_mean(tf.reduce_sum(self.probs * self.logsoftmax, axis=1), name="entropy_loss")
+            #self.loss_entropy_value = self.loss_entropy + self.loss_value
 
             self._optimizer1 = tf.train.AdamOptimizer(name="optimizer1").minimize(self.loss_policy)
-            self._optimizer2 = tf.train.AdamOptimizer(name="optimizer2").minimize(self.loss_entropy_value)
+            self._optimizer2 = tf.train.AdamOptimizer(name="optimizer2").minimize(self.loss_value)
 
             self._var_init = tf.global_variables_initializer()
 
@@ -296,7 +296,7 @@ class A2CNetwork:
         return sess.run(self.value, feed_dict={self._states: states})
 
     def train_batch(self, sess, states, actions, q_vals):
-        loss_policy, loss_value, _, _ = sess.run([self.loss_policy, self.loss_entropy_value,
+        loss_policy, loss_value, _, _ = sess.run([self.loss_policy, self.loss_value,
                                        self._optimizer1, self._optimizer2],
                                       feed_dict={self._states: states, self._y_train: q_vals, self._actions: actions})
 

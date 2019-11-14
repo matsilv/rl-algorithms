@@ -46,7 +46,7 @@ def q_learning(batch, q_net, target_net, sess, gamma, input_shape, double):
         x[i] = state
         y[i] = current_q
 
-    loss = q_net.train_batch(sess, x, y)
+    loss = q_net.train_batch(sess, states=x, actions=None, q_vals=y)
     return loss
 
 
