@@ -179,9 +179,15 @@ class CNNModel:
             return sess.run(self._logits, feed_dict={self._states: states})
 
     # train the model given the input state and expected next state Q-values
-    def train_batch(self, sess, x_batch, y_batch):
-        loss, _ = sess.run([self.loss, self._optimizer], feed_dict={self._states: x_batch,
-                                             self._y_train: y_batch})
+    def train_batch(self, sess, states, actions, q_vals):
+        if actions is not None:
+            loss, _ = sess.run([self.loss, self._optimizer],
+                               feed_dict={self._actions: actions,
+                                          self._states: states,
+                                          self._y_train: q_vals})
+        else:
+            loss, _ = sess.run([self.loss, self._optimizer], feed_dict={self._states: states,
+                                                                        self._y_train: q_vals})
 
         return loss
 
@@ -274,7 +280,7 @@ class A2CNetwork:
             neg_log_prob = adv * tf.nn.softmax_cross_entropy_with_logits_v2(logits=self.policy,
                                                                             labels=self._actions)
             self.loss_policy = tf.reduce_mean(neg_log_prob * self._y_train, name="loss_policy")
-            self.loss_value = tf.reduce_mean(tf.square(self.value - self._y_train), name="loss_value")
+            self.loss_value = tf.reduce_mean((self.value - self._y_train)**2, name="loss_value")
             #self.loss_entropy = \
             #    0.0 * tf.reduce_mean(tf.reduce_sum(self.probs * self.logsoftmax, axis=1), name="entropy_loss")
             #self.loss_entropy_value = self.loss_entropy + self.loss_value

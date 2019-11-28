@@ -1,13 +1,22 @@
 #Author: Mattia Silvestri
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from common.policy import RandomPolicy, EpsilonGreedyPolicy, GreedyPolicy, StochasticPolicy
 from common.memory import ReplayExperienceBuffer
 from common.model import CNNModel, FullyConnectedModel, A2CNetwork
 from common.atari_wrapper import make_env
 import gym
 import copy
+
+# Tensorflow GPU setup
+config = tf.ConfigProto()
+# initial memory
+# es.: 0.1 di 12 GB = 1.2 GB
+config.gpu_options.per_process_gpu_memory_fraction = 0.2
+# allow dynamic memory allocation
+config.gpu_options.allow_growth = True
+config.gpu_options.visible_device_list = "0"
 
 
 # Deep Q-learning algorithm
@@ -62,7 +71,7 @@ def q_learning_main(args):
     else:
         ATARI = False
     NUM_STEPS = args.num_steps
-    MEM_LENGHT = 10000
+    MEM_LENGHT = args.mem_size
     BATCH_SIZE = args.batch_size
     EPSILON_START = args.epsilon_start
     EPSILON_END = args.epsilon_end
@@ -102,7 +111,7 @@ def q_learning_main(args):
     policy = EpsilonGreedyPolicy(env.action_space.n, EPSILON_START, EPSILON_END, EPSILON_STEPS)
 
 
-    with tf.Session() as sess:
+    with tf.Session(config=config) as sess:
         sess.run(q_fun_net.var_init)
         sess.run(target_net.var_init)
 
@@ -228,7 +237,7 @@ def reinforce_main(args):
 
     policy = StochasticPolicy(env.action_space.n)
 
-    with tf.Session() as sess:
+    with tf.Session(config=config) as sess:
         sess.run(policy_net.var_init)
 
         frames = 0
@@ -284,9 +293,11 @@ def reinforce_main(args):
         game_over = False
 
         while not game_over:
-            probs = policy_net.predict_one(s_t, sess)
+            probs = policy_net.predict_one(s_t, sess, apply_softmax=True)
+            probs = probs.reshape(-1)
             a_t = policy.select_action(probs)
             s_tp1, r_t, game_over, _ = env.step(a_t)
+            s_t = s_tp1
             score += r_t
 
         print('Score: {}'.format(score))
@@ -328,7 +339,7 @@ def a2c_main(args):
 
     policy = StochasticPolicy(env.action_space.n)
 
-    with tf.Session() as sess:
+    with tf.Session(config=config) as sess:
         sess.run(policy_net.var_init)
 
         frames = 0
@@ -338,6 +349,9 @@ def a2c_main(args):
         actions = []
         states = []
         idx = 0
+
+        loss_policy = 0
+        loss_value = 0
 
         while frames < NUM_STEPS:
             game_over = False
@@ -370,33 +384,15 @@ def a2c_main(args):
                     print('Interval mean reward: {}'.format(r_interval))
                     r_interval = 0
 
-                if len(rewards) == BATCH_SIZE:
-                    q_vals = calc_qvals(rewards, gamma=GAMMA)
+            q_vals = calc_qvals(rewards, gamma=GAMMA)
+            loss_policy, loss_value = policy_net.train_batch(sess, states, actions, q_vals)
+            states.clear()
+            q_vals.clear()
+            rewards.clear()
+            actions.clear()
 
-                    last_vals = policy_net.predict_values(states, sess)
-                    last_vals.reshape(-1)
-                    for id in range(len(q_vals)):
-                        q_vals[id] += GAMMA * last_vals[id]
-
-                    q_vals = np.asarray(q_vals).reshape(-1)
-
-                    policy_net.train_batch(sess, states, actions, q_vals)
-                    num_episodes = len(states)
-                    states.clear()
-                    rewards.clear()
-                    actions.clear()
-
-            if len(rewards) > 0:
-                q_vals = calc_qvals(rewards, gamma=GAMMA)
-                num_episodes = len(states)
-                loss_policy, loss_value = policy_net.train_batch(sess, states, actions, q_vals)
-                states.clear()
-                q_vals.clear()
-                rewards.clear()
-                actions.clear()
-
-            print('Frame: {}/{} | Score: {} | Loss policy: {} | Loss value: {} | Steps: {}'.
-                  format(frames, NUM_STEPS, score, loss_policy, loss_value, num_episodes))
+            print('Frame: {}/{} | Score: {} | Loss policy: {} | Loss value: {}'.
+                  format(frames, NUM_STEPS, score, loss_policy, loss_value))
 
         s_t = env.reset()
         policy = StochasticPolicy(env.action_space.n)
@@ -405,8 +401,9 @@ def a2c_main(args):
 
         while not game_over:
             probs = policy_net.predict_one(s_t, sess)
-            a_t = policy.select_action(probs)
+            a_t = policy.select_action(probs.reshape(-1))
             s_tp1, r_t, game_over, _ = env.step(a_t)
+            s_t = s_tp1
             score += r_t
 
         print('Score: {}'.format(score))
