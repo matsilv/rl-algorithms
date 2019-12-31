@@ -1,7 +1,7 @@
 #Author: Mattia Silvestri
 
 import numpy as np
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 from common.policy import RandomPolicy, EpsilonGreedyPolicy, GreedyPolicy, StochasticPolicy
 from common.memory import ReplayExperienceBuffer
 from common.model import CNNModel, FullyConnectedModel, A2CNetwork
